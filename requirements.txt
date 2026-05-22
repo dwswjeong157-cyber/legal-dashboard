@@ -5,3 +5,5 @@ openpyxl
 Pillow
 google-auth
 google-api-python-client
+python-dateutil
+kaleido==0.2.1
