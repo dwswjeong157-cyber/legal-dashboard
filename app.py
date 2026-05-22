@@ -273,17 +273,23 @@ df, file_name, file_date = load_data()
 now     = get_now()
 base_dt = now.replace(tzinfo=None)
 
-# 헤더
-col_logo, col_title = st.columns([1, 7])
-with col_logo:
+# 헤더 (좌: 대웅 로고 / 중앙: 제목 / 우: 법무팀 이미지)
+col_logo_left, col_title, col_logo_right = st.columns([1, 5, 1])
+
+with col_logo_left:
     if os.path.exists("dw_logo.png"):
         st.image("dw_logo.png", width=120)
+
 with col_title:
     st.title("계약TF vs 법무팀 업무량 비교")
     st.caption(
         f"집계 시각: {now.strftime('%Y-%m-%d %H:%M')} KST  |  "
         f"데이터 파일: {file_name} ({file_date})"
     )
+
+with col_logo_right:
+    if os.path.exists("legal_team.png"):
+        st.image("legal_team.png", width=120)
 
 # 새로고침 버튼 (파일 업로드 후 즉시 반영)
 if st.button("🔄 데이터 새로고침"):
