@@ -329,7 +329,7 @@ else:
                 img_pie = pio.to_image(fig_pie, format='png', width=800, height=500, engine='kaleido') if fig_pie else None
 
                 msg = MIMEMultipart('related')
-                msg['Subject'] = f"[대웅법무] 업무 현황 리포트 ({now_kst.strftime('%y.%m.%d')})"
+                msg['Subject'] = f"[대웅법무] 월간 리포트 ({now_kst.strftime('%y.%m.%d')})"
                 msg['From'] = S_MAIL
                 msg['To'] = receiver_input
 
