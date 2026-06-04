@@ -40,7 +40,6 @@ ACTIVE_STATUS = '법무 검토 중'
 # ============================================================
 PRESET_RECIPIENTS = {
     "이정아 실장 (법무1팀)": "jungah.lee@daewoong.co.kr",
-    "강정한 팀장 (법무2팀)": "jhgang214@daewoong.co.kr",
     "변정연 팀장 (법무1팀)": "jybyun727@daewoong.co.kr",
     "김도희 (법무1팀)": "2600323@daewoong.co.kr",
     "류시연 (법무1팀)": "2240585@daewoong.co.kr",
@@ -48,9 +47,10 @@ PRESET_RECIPIENTS = {
     "손유진 (법무1팀)": "syj0826@daewoong.co.kr",
     "이정은 (법무1팀)": "2230213@daewoong.co.kr",
     "임희수 (법무1팀)": "2500994@daewoong.co.kr",
-    "정성욱 (본인 · 법무2팀)": "swjeong157@daewoong.co.kr",
     "정은정 (법무1팀)": "2240112@daewoong.co.kr",
     "최자연 (법무1팀)": "2500863@daewoong.co.kr",
+    "강정한 팀장 (법무2팀)": "jhgang214@daewoong.co.kr",
+    "정성욱 (법무2팀)": "swjeong157@daewoong.co.kr",
     "홍민기 (법무2팀)": "mghong138@daewoong.co.kr",
 }
 
