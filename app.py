@@ -33,6 +33,27 @@ DONE_STATUSES = [
 ]
 ACTIVE_STATUS = '법무 검토 중'
 
+# ============================================================
+# 사전 등록 수신자 (필요시 자유롭게 추가/수정/삭제)
+# 순서: 직책 (실장 → 팀장) → 가나다순
+# 형식: "표시 이름": "이메일주소"
+# ============================================================
+PRESET_RECIPIENTS = {
+    "이정아 실장 (법무1팀)": "jungah.lee@daewoong.co.kr",
+    "강정한 팀장 (법무2팀)": "jhgang214@daewoong.co.kr",
+    "변정연 팀장 (법무1팀)": "jybyun727@daewoong.co.kr",
+    "김도희 (법무1팀)": "2600323@daewoong.co.kr",
+    "류시연 (법무1팀)": "2240585@daewoong.co.kr",
+    "박진효 (법무1팀)": "8800654@daewoong.co.kr",
+    "손유진 (법무1팀)": "syj0826@daewoong.co.kr",
+    "이정은 (법무1팀)": "2230213@daewoong.co.kr",
+    "임희수 (법무1팀)": "2500994@daewoong.co.kr",
+    "정성욱 (본인 · 법무2팀)": "swjeong157@daewoong.co.kr",
+    "정은정 (법무1팀)": "2240112@daewoong.co.kr",
+    "최자연 (법무1팀)": "2500863@daewoong.co.kr",
+    "홍민기 (법무2팀)": "mghong138@daewoong.co.kr",
+}
+
 
 # ============================================================
 # 파일 처리 함수
@@ -314,10 +335,44 @@ if not email_configured:
         "ℹ️ 이메일 발송 기능을 사용하려면 Streamlit Secrets에 이메일 설정을 추가해야 합니다."
     )
 else:
-    col_f1, col_f2 = st.columns([6, 2])
-    receiver_input = col_f1.text_input("메일 주소 입력", value="@daewoong.co.kr")
+    # 1. 사전 등록 수신자에서 멀티셀렉트
+    preset_options = [f"{name} ({email})" for name, email in PRESET_RECIPIENTS.items()]
+    selected_presets = st.multiselect(
+        "받는 사람 선택 (복수 선택 가능)",
+        options=preset_options,
+        help="목록에 없는 주소는 아래 직접 입력란에 추가하세요."
+    )
 
-    if col_f2.button("🚀 리포트 발송", use_container_width=True):
+    # 2. 추가 직접 입력 (선택)
+    custom_input = st.text_input(
+        "추가 이메일 (직접 입력, 선택사항)",
+        placeholder="쉼표로 구분 — 예: kim@daewoong.co.kr, lee@daewoong.co.kr"
+    )
+
+    # 3. 최종 수신자 리스트 구성
+    recipients = []
+    for sel in selected_presets:
+        # "이름 (email@xxx)" 형식에서 이메일만 추출
+        email = sel.rsplit('(', 1)[-1].rstrip(')').strip()
+        recipients.append(email)
+
+    if custom_input.strip():
+        for addr in custom_input.split(','):
+            addr = addr.strip()
+            if addr:
+                recipients.append(addr)
+
+    # 중복 제거 (순서 유지)
+    recipients = list(dict.fromkeys(recipients))
+
+    # 4. 발송 요약 표시
+    if recipients:
+        st.success(f"📬 총 **{len(recipients)}명**에게 발송 예정: {', '.join(recipients)}")
+    else:
+        st.caption("받는 사람을 1명 이상 선택하거나 입력해주세요.")
+
+    # 5. 발송 버튼
+    if st.button("🚀 리포트 발송", use_container_width=True, disabled=(len(recipients) == 0)):
         with st.spinner("리포트 생성 중..."):
             try:
                 S_MAIL = st.secrets["email"]["sender"]
@@ -330,7 +385,7 @@ else:
                 msg = MIMEMultipart('related')
                 msg['Subject'] = f"[대웅법무] 업무 현황 리포트 ({now_kst.strftime('%y.%m.%d')})"
                 msg['From'] = S_MAIL
-                msg['To'] = receiver_input
+                msg['To'] = ", ".join(recipients)
 
                 html_mail = (
                     f'<html><body style="font-family:Malgun Gothic; padding:20px; background:#f9f9f9;">'
@@ -378,7 +433,8 @@ else:
 
                 with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
                     s.login(S_MAIL, S_PW)
-                    s.sendmail(S_MAIL, receiver_input, msg.as_string())
-                st.success(f"✅ {receiver_input}로 리포트 발송 완료!")
+                    s.sendmail(S_MAIL, recipients, msg.as_string())
+                st.success(f"✅ {len(recipients)}명에게 리포트 발송 완료!")
+                st.caption(f"받는 사람: {', '.join(recipients)}")
             except Exception as e:
                 st.error(f"실패: {e}")
