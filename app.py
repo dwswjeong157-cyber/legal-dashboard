@@ -11,6 +11,9 @@ from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 # ============================================================
 # 기본 설정
@@ -33,6 +36,9 @@ DONE_STATUSES = [
 ]
 ACTIVE_STATUS = '법무 검토 중'
 
+# 영구 대시보드 URL (이메일 본문에 들어감)
+DASHBOARD_URL = "https://daewoong-contract-dashboard.streamlit.app"
+
 # ============================================================
 # 사전 등록 수신자 (필요시 자유롭게 추가/수정/삭제)
 # 순서: 직책 (실장 → 팀장) → 가나다순
@@ -40,6 +46,7 @@ ACTIVE_STATUS = '법무 검토 중'
 # ============================================================
 PRESET_RECIPIENTS = {
     "이정아 실장 (법무1팀)": "jungah.lee@daewoong.co.kr",
+    "강정한 팀장 (법무2팀)": "jhgang214@daewoong.co.kr",
     "변정연 팀장 (법무1팀)": "jybyun727@daewoong.co.kr",
     "김도희 (법무1팀)": "2600323@daewoong.co.kr",
     "류시연 (법무1팀)": "2240585@daewoong.co.kr",
@@ -47,27 +54,61 @@ PRESET_RECIPIENTS = {
     "손유진 (법무1팀)": "syj0826@daewoong.co.kr",
     "이정은 (법무1팀)": "2230213@daewoong.co.kr",
     "임희수 (법무1팀)": "2500994@daewoong.co.kr",
+    "정성욱 (본인 · 법무2팀)": "swjeong157@daewoong.co.kr",
     "정은정 (법무1팀)": "2240112@daewoong.co.kr",
     "최자연 (법무1팀)": "2500863@daewoong.co.kr",
-    "강정한 팀장 (법무2팀)": "jhgang214@daewoong.co.kr",
-    "정성욱 (법무2팀)": "swjeong157@daewoong.co.kr",
     "홍민기 (법무2팀)": "mghong138@daewoong.co.kr",
 }
 
 
 # ============================================================
-# 파일 처리 함수
+# 데이터 로드 (Google Drive API)
 # ============================================================
-def process_uploaded_file(uploaded_file):
-    """업로드된 파일을 DataFrame으로 변환하고 클리닝"""
-    if uploaded_file.name.endswith(".xlsx"):
-        df = pd.read_excel(uploaded_file)
+@st.cache_data(ttl=300)
+def load_data():
+    """Google Drive에서 최신 파일을 가져와 DataFrame으로 변환"""
+    credentials = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    service = build("drive", "v3", credentials=credentials)
+    folder_id = st.secrets["drive"]["folder_id"]
+
+    query = (
+        f"'{folder_id}' in parents "
+        f"and (name contains '.xlsx' or name contains '.csv') "
+        f"and trashed = false"
+    )
+    results = service.files().list(
+        q=query,
+        orderBy="modifiedTime desc",
+        pageSize=1,
+        fields="files(id, name, modifiedTime)"
+    ).execute()
+
+    files = results.get("files", [])
+    if not files:
+        st.error("Google Drive 폴더에 파일이 없습니다.")
+        st.stop()
+
+    latest = files[0]
+
+    request = service.files().get_media(fileId=latest["id"])
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    fh.seek(0)
+
+    if latest["name"].endswith(".xlsx"):
+        df = pd.read_excel(fh)
     else:
         try:
-            df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
+            df = pd.read_csv(fh, encoding="utf-8-sig")
         except UnicodeDecodeError:
-            uploaded_file.seek(0)
-            df = pd.read_csv(uploaded_file, encoding="cp949")
+            fh.seek(0)
+            df = pd.read_csv(fh, encoding="cp949")
 
     # 데이터 클리닝
     if '계약 상태' in df.columns:
@@ -85,7 +126,16 @@ def process_uploaded_file(uploaded_file):
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
 
-    return df
+    return df, latest["name"], latest["modifiedTime"][:10]
+
+
+# ============================================================
+# 데이터 로드 실행
+# ============================================================
+df, file_name, file_date = load_data()
+staff_list = sorted([s for s in df['배정된 검토자'].unique() if s != '⚠️ 미배정'])
+now_kst = get_now()
+now_naive = now_kst.replace(tzinfo=None)
 
 
 # ============================================================
@@ -102,52 +152,20 @@ with col_title:
     st.markdown(
         f"<p style='color:{DW_ORANGE}; font-weight:bold; margin-top:-15px;'>"
         f"Daewoong Legal Task Status | "
-        f"<span style='font-size:1.2rem;'>{get_now().strftime('%Y-%m-%d %H:%M')} (KST)</span>"
+        f"<span style='font-size:1.2rem;'>{now_kst.strftime('%Y-%m-%d %H:%M')} (KST)</span>"
         f"</p>",
         unsafe_allow_html=True
     )
+    st.caption(f"데이터 파일: {file_name} ({file_date})")
 
 with col_logo_right:
     if os.path.exists('legal_team.png'):
         st.image('legal_team.png', width=140)
 
-st.markdown("---")
-
-
-# ============================================================
-# 파일 업로더
-# ============================================================
-st.subheader("📤 파일 업로드")
-st.caption(
-    "앨리비에서 다운로드한 엑셀 또는 CSV 파일을 아래 영역에 **드래그하거나 클릭하여 업로드**하세요. "
-    "파일은 분석에만 사용되며 서버에 저장되지 않습니다. 페이지를 떠나면 사라집니다."
-)
-
-uploaded_file = st.file_uploader(
-    "파일을 여기에 드래그 (.xlsx 또는 .csv)",
-    type=["xlsx", "csv"],
-    label_visibility="collapsed"
-)
-
-if uploaded_file is None:
-    st.info("👆 분석할 파일을 업로드해주세요.")
-    st.stop()
-
-# 파일 처리
-try:
-    df = process_uploaded_file(uploaded_file)
-    if df.empty:
-        st.error("❌ 업로드한 파일에서 유효한 데이터를 찾을 수 없습니다.")
-        st.stop()
-    st.success(f"✅ {uploaded_file.name} 분석 준비 완료 ({len(df):,}건)")
-except Exception as e:
-    st.error(f"❌ 파일 처리 오류: {e}")
-    st.caption("엑셀/CSV 형식과 컬럼 구조를 확인해주세요.")
-    st.stop()
-
-staff_list = sorted([s for s in df['배정된 검토자'].unique() if s != '⚠️ 미배정'])
-now_kst = get_now()
-now_naive = now_kst.replace(tzinfo=None)
+# 새로고침 버튼
+if st.button("🔄 데이터 새로고침"):
+    load_data.clear()
+    st.rerun()
 
 st.markdown("---")
 
@@ -317,7 +335,7 @@ else:
 # SECTION 6: 원본 데이터 미리보기 (옵션)
 # ============================================================
 st.markdown("---")
-with st.expander("🔍 업로드된 원본 데이터 보기 (전체 컬럼 확인용)"):
+with st.expander("🔍 원본 데이터 보기 (전체 컬럼 확인용)"):
     st.dataframe(df.head(50), use_container_width=True)
     st.caption(f"총 {len(df):,}건 중 상위 50건 표시. 전체 컬럼: {', '.join(df.columns.tolist())}")
 
@@ -387,20 +405,41 @@ else:
                 msg['From'] = S_MAIL
                 msg['To'] = ", ".join(recipients)
 
+                url_section = (
+                    f'<div style="margin-top:40px; padding:20px; background:#f0f0f0; border-radius:10px; text-align:center;">'
+                    f'<h4 style="margin:0;">🔗 업무 현황 대시보드 바로가기</h4>'
+                    f'<p style="font-size:13px; color:#666; margin:10px 0;">'
+                    f'실시간 데이터·상세 필터링이 가능한 웹 리포트입니다.</p>'
+                    f'<a href="{DASHBOARD_URL}" style="display:inline-block; padding:12px 25px; '
+                    f'background:{DW_ORANGE}; color:white; text-decoration:none; '
+                    f'border-radius:5px; font-weight:bold;">대시보드 접속하기</a>'
+                    f'</div>'
+                )
+
                 html_mail = (
                     f'<html><body style="font-family:Malgun Gothic; padding:20px; background:#f9f9f9;">'
-                    f'<div style="max-width:850px; margin:auto; background:white; padding:30px; border-radius:15px; border:1px solid #ddd;">'
-                    f'<div style="background:{DW_ORANGE}; padding:20px; text-align:center; color:white; border-radius:10px 10px 0 0;">'
-                    f'<h1 style="margin:0;">대웅 법무 업무 현황 리포트</h1>'
-                    f'</div>'
+                    f'<div style="max-width:850px; margin:auto; background:white; padding:30px; '
+                    f'border-radius:15px; border:1px solid #ddd;">'
+                    f'<div style="background:{DW_ORANGE}; padding:20px; text-align:center; color:white; '
+                    f'border-radius:10px 10px 0 0;">'
+                    f'<h1 style="margin:0;">대웅 법무 업무 현황 리포트</h1></div>'
                     f'<div style="padding:20px;">'
-                    f'<p style="text-align:right; font-size:14px; color:#666;">분석 파일: {uploaded_file.name}</p>'
-                    f'<p style="text-align:right; font-size:18px; color:#333; font-weight:bold;">기준 시각: {now_kst.strftime("%Y-%m-%d %H:%M")} (KST)</p>'
-                    f'<h3 style="color:{DW_ORANGE}; border-left:6px solid {DW_ORANGE}; padding-left:12px;">🚀 핵심 지표 요약</h3>'
-                    f'<table style="width:100%; text-align:center; border-collapse:collapse; margin-bottom:25px; background:#fffbf7;">'
-                    f'<tr><td style="padding:15px; border:1px solid #eee;"><b>현재 검토 중</b><br><span style="font-size:22px; color:red; font-weight:bold;">{len(active_df)}건</span></td>'
-                    f'<td style="padding:15px; border:1px solid #eee;"><b>이번달 완료</b><br><span style="font-size:22px; color:blue; font-weight:bold;">{c_m0}건</span></td>'
-                    f'<td style="padding:15px; border:1px solid #eee;"><b>지난달 완료</b><br><span style="font-size:22px; color:#333; font-weight:bold;">{c_m1}건</span></td></tr></table>'
+                    f'<p style="text-align:right; font-size:14px; color:#666;">'
+                    f'데이터 기준: {file_name} ({file_date})</p>'
+                    f'<p style="text-align:right; font-size:18px; color:#333; font-weight:bold;">'
+                    f'기준 시각: {now_kst.strftime("%Y-%m-%d %H:%M")} (KST)</p>'
+                    f'<h3 style="color:{DW_ORANGE}; border-left:6px solid {DW_ORANGE}; padding-left:12px;">'
+                    f'🚀 핵심 지표 요약</h3>'
+                    f'<table style="width:100%; text-align:center; border-collapse:collapse; '
+                    f'margin-bottom:25px; background:#fffbf7;">'
+                    f'<tr>'
+                    f'<td style="padding:15px; border:1px solid #eee;"><b>현재 검토 중</b><br>'
+                    f'<span style="font-size:22px; color:red; font-weight:bold;">{len(active_df)}건</span></td>'
+                    f'<td style="padding:15px; border:1px solid #eee;"><b>이번달 완료</b><br>'
+                    f'<span style="font-size:22px; color:blue; font-weight:bold;">{c_m0}건</span></td>'
+                    f'<td style="padding:15px; border:1px solid #eee;"><b>지난달 완료</b><br>'
+                    f'<span style="font-size:22px; color:#333; font-weight:bold;">{c_m1}건</span></td>'
+                    f'</tr></table>'
                     f'<h3 style="color:{DW_ORANGE};">👤 계약검토 배정 현황</h3>'
                     f'<img src="cid:load" style="width:100%; border:1px solid #eee; margin-bottom:25px;">'
                 )
@@ -416,7 +455,7 @@ else:
                         f'<img src="cid:pie" style="width:100%; border:1px solid #eee;">'
                     )
 
-                html_mail += '</div></div></body></html>'
+                html_mail += f'{url_section}</div></div></body></html>'
 
                 msg.attach(MIMEText(html_mail, 'html'))
 
